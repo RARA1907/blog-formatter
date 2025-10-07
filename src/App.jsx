@@ -14,7 +14,7 @@ export default function App() {
   const extractPathAndFilename = (url) => {
     try {
       const urlObj = new URL(url);
-      const pathname = urlObj.pathname;
+      const pathname = decodeURIComponent(urlObj.pathname);
       const filename = pathname.split('/').pop();
       const path = urlObj.origin + pathname.substring(0, pathname.lastIndexOf('/') + 1);
       return { path, filename };
@@ -36,13 +36,22 @@ export default function App() {
         // Set basePath from first URL
         setBasePath(parsed[0].path);
         
-        // Add filenames to uploadedFiles
+        // Add filenames to uploadedFiles (keep existing ones)
         const newFiles = parsed.map(p => ({
           name: p.filename,
-          id: Math.random().toString(36)
+          id: Math.random().toString(36),
+          source: 'link'
         }));
-        setUploadedFiles(newFiles);
+        
+        // Remove old link-based files, keep uploaded ones
+        setUploadedFiles(prev => [
+          ...prev.filter(f => f.source !== 'link'),
+          ...newFiles
+        ]);
       }
+    } else {
+      // Clear link-based files when links are cleared
+      setUploadedFiles(prev => prev.filter(f => f.source !== 'link'));
     }
   };
 
@@ -50,7 +59,8 @@ export default function App() {
     const files = Array.from(e.target.files);
     const newFiles = files.map(file => ({
       name: file.name,
-      id: Math.random().toString(36)
+      id: Math.random().toString(36),
+      source: 'upload'
     }));
     setUploadedFiles(prev => [...prev, ...newFiles]);
   };
@@ -61,6 +71,8 @@ export default function App() {
 
   const clearPhotoLinks = () => {
     setPhotoLinks('');
+    // Remove only link-based files
+    setUploadedFiles(prev => prev.filter(f => f.source !== 'link'));
   };
 
   const parseVideoUrl = (url) => {
@@ -426,7 +438,7 @@ export default function App() {
 
   const loadExample = () => {
     setBasePath('https://dersdeo.com/cinnamomo/wp-content/uploads/2025/10/');
-    setPhotoLinks('https://dersdeo.com/cinnamomo/wp-content/uploads/2025/10/paulista-1.jpg\nhttps://dersdeo.com/cinnamomo/wp-content/uploads/2025/10/veridiana-2.jpg');
+    setPhotoLinks('https://dersdeo.com/cinnamomo/wp-content/uploads/2025/10/paulista-beautiful-sunset-evening-1.jpg\nhttps://dersdeo.com/cinnamomo/wp-content/uploads/2025/10/veridiana-pizza-restaurant-interior-design-2.jpg');
     setVideoLinks('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
     setInput(`Paulista! Everything ends in pizza
 Pizzeria Veridiana, Jardins district, São Paulo
@@ -482,7 +494,7 @@ Words by Lina Bo Bardi, who became the architect of the MASP. She completed it i
             📝 Elementor Blog Formatter
           </h1>
           <p style={{ color: '#4a5568', fontSize: '18px', marginBottom: '16px', fontFamily: 'Poppins, sans-serif', fontWeight: '400' }}>
-            Paste links or upload files, add videos, generate perfect HTML!
+            Paste links, upload files, or mix both - generate perfect HTML!
           </p>
           <button
             onClick={loadExample}
@@ -512,12 +524,12 @@ Words by Lina Bo Bardi, who became the architect of the MASP. She completed it i
             <StepCard number="1" title="Add Photos" icon={Link} isActive={!basePath || uploadedFiles.length === 0}>
               <div style={{ marginBottom: '16px' }}>
                 <label style={{ fontSize: '14px', color: '#4a5568', display: 'block', marginBottom: '8px', fontFamily: 'Poppins, sans-serif', fontWeight: '600' }}>
-                  Option A: Paste Photo Links (Auto-extracts path & names!)
+                  Option A: Paste Photo Links
                 </label>
                 <textarea
                   value={photoLinks}
                   onChange={handlePhotoLinksChange}
-                  placeholder="https://yoursite.com/wp-content/uploads/2025/10/photo1.jpg&#10;https://yoursite.com/wp-content/uploads/2025/10/photo2.jpg&#10;&#10;One full URL per line"
+                  placeholder="https://yoursite.com/.../my-long-photo-name-with-details-1.jpg&#10;https://yoursite.com/.../another-very-descriptive-photo-name-2.jpg&#10;&#10;✨ Supports long filenames! One URL per line"
                   style={{
                     width: '100%',
                     height: '100px',
@@ -561,12 +573,12 @@ Words by Lina Bo Bardi, who became the architect of the MASP. She completed it i
                 fontSize: '14px',
                 fontWeight: '600'
               }}>
-                ─── OR ───
+                ─── AND/OR ───
               </div>
 
               <div>
                 <label style={{ fontSize: '14px', color: '#4a5568', display: 'block', marginBottom: '8px', fontFamily: 'Poppins, sans-serif', fontWeight: '600' }}>
-                  Option B: Upload New Photos
+                  Option B: Upload Photos
                 </label>
                 
                 <input
@@ -602,30 +614,54 @@ Words by Lina Bo Bardi, who became the architect of the MASP. She completed it i
                   onMouseOut={(e) => e.target.style.transform = 'translateY(0)'}
                 >
                   <Upload size={20} />
-                  Click to Select Photos
+                  Add More Photos
                 </button>
 
-                <div style={{ marginTop: '12px', fontSize: '14px', color: '#4a5568', fontFamily: 'Poppins, sans-serif' }}>
-                  <strong>📁 Folder Path:</strong>
-                  <div style={{ 
-                    marginTop: '4px',
-                    padding: '8px',
-                    background: '#f7fafc',
-                    borderRadius: '6px',
-                    fontSize: '12px',
-                    fontFamily: 'monospace',
-                    wordBreak: 'break-all',
-                    color: photoLinks ? '#10b981' : '#718096'
-                  }}>
-                    {basePath || 'Will be set from photo links or manually...'}
+                {!photoLinks && (
+                  <div style={{ marginTop: '12px', fontSize: '14px', color: '#4a5568', fontFamily: 'Poppins, sans-serif' }}>
+                    <strong>📁 Folder Path (if uploading only):</strong>
+                    <input
+                      type="text"
+                      value={basePath}
+                      onChange={(e) => setBasePath(e.target.value)}
+                      placeholder="https://yoursite.com/wp-content/uploads/2025/10/"
+                      style={{
+                        width: '100%',
+                        marginTop: '6px',
+                        padding: '8px',
+                        border: '2px solid #e2e8f0',
+                        borderRadius: '6px',
+                        fontSize: '12px',
+                        fontFamily: 'monospace'
+                      }}
+                    />
                   </div>
-                </div>
+                )}
+
+                {photoLinks && (
+                  <div style={{ marginTop: '12px', fontSize: '14px', color: '#4a5568', fontFamily: 'Poppins, sans-serif' }}>
+                    <strong>📁 Auto-detected path:</strong>
+                    <div style={{ 
+                      marginTop: '4px',
+                      padding: '8px',
+                      background: '#f0fdf4',
+                      borderRadius: '6px',
+                      fontSize: '12px',
+                      fontFamily: 'monospace',
+                      wordBreak: 'break-all',
+                      color: '#10b981',
+                      border: '1px solid #86efac'
+                    }}>
+                      ✅ {basePath}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {uploadedFiles.length > 0 && (
                 <div style={{ marginTop: '12px', maxHeight: '150px', overflowY: 'auto', background: '#f7fafc', borderRadius: '8px', padding: '12px' }}>
                   <div style={{ fontSize: '13px', fontWeight: '600', color: '#4a5568', marginBottom: '8px', fontFamily: 'Poppins, sans-serif' }}>
-                    📁 {uploadedFiles.length} photo{uploadedFiles.length > 1 ? 's' : ''}
+                    📁 {uploadedFiles.length} photo{uploadedFiles.length > 1 ? 's' : ''} ready
                   </div>
                   {uploadedFiles.map(file => (
                     <div key={file.id} style={{ 
@@ -636,12 +672,24 @@ Words by Lina Bo Bardi, who became the architect of the MASP. She completed it i
                       background: 'white',
                       borderRadius: '6px',
                       marginBottom: '6px',
-                      fontSize: '13px',
+                      fontSize: '12px',
                       fontFamily: 'monospace'
                     }}>
-                      <span style={{ color: '#4a5568', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {file.name}
-                      </span>
+                      <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ 
+                          fontSize: '10px',
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          background: file.source === 'link' ? '#dbeafe' : '#f3e8ff',
+                          color: file.source === 'link' ? '#1e40af' : '#6b21a8',
+                          fontWeight: '600'
+                        }}>
+                          {file.source === 'link' ? '🔗' : '📤'}
+                        </span>
+                        <span style={{ color: '#4a5568', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {file.name}
+                        </span>
+                      </div>
                       <button
                         onClick={() => removeFile(file.id)}
                         style={{
@@ -652,7 +700,8 @@ Words by Lina Bo Bardi, who became the architect of the MASP. She completed it i
                           cursor: 'pointer',
                           color: '#e53e3e',
                           display: 'flex',
-                          alignItems: 'center'
+                          alignItems: 'center',
+                          marginLeft: '8px'
                         }}
                       >
                         <X size={14} />
@@ -823,24 +872,24 @@ Words by Lina Bo Bardi, who became the architect of the MASP. She completed it i
           boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
           marginBottom: '24px'
         }}>
-          <h3 style={{ margin: '0 0 18px', fontSize: '20px', color: '#2d3748', fontFamily: 'Poppins, sans-serif', fontWeight: '700' }}>💡 Quick Tips</h3>
+          <h3 style={{ margin: '0 0 18px', fontSize: '20px', color: '#2d3748', fontFamily: 'Poppins, sans-serif', fontWeight: '700' }}>💡 Pro Features</h3>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
             <div style={{ padding: '16px', background: '#fff5f0', borderRadius: '12px', borderLeft: '4px solid #ff8c42' }}>
-              <strong style={{ color: '#ff6b35', fontFamily: 'Poppins, sans-serif', fontSize: '15px' }}>Smart Links:</strong>
+              <strong style={{ color: '#ff6b35', fontFamily: 'Poppins, sans-serif', fontSize: '15px' }}>Mix & Match:</strong>
               <p style={{ margin: '6px 0 0', fontSize: '14px', color: '#4a5568', fontFamily: 'Poppins, sans-serif', lineHeight: '1.6' }}>
-                Paste full photo URLs - path & names extracted automatically!
+                Use links AND uploads together - both work simultaneously!
               </p>
             </div>
             <div style={{ padding: '16px', background: '#fef5e7', borderRadius: '12px', borderLeft: '4px solid #f59e0b' }}>
-              <strong style={{ color: '#d97706', fontFamily: 'Poppins, sans-serif', fontSize: '15px' }}>Two Ways:</strong>
+              <strong style={{ color: '#d97706', fontFamily: 'Poppins, sans-serif', fontSize: '15px' }}>Long Names OK:</strong>
               <p style={{ margin: '6px 0 0', fontSize: '14px', color: '#4a5568', fontFamily: 'Poppins, sans-serif', lineHeight: '1.6' }}>
-                Paste links OR upload files - both work perfectly!
+                Supports very long descriptive filenames - no limits!
               </p>
             </div>
             <div style={{ padding: '16px', background: '#f3e8ff', borderRadius: '12px', borderLeft: '4px solid #9333ea' }}>
-              <strong style={{ color: '#7e22ce', fontFamily: 'Poppins, sans-serif', fontSize: '15px' }}>Zero Errors:</strong>
+              <strong style={{ color: '#7e22ce', fontFamily: 'Poppins, sans-serif', fontSize: '15px' }}>Smart Icons:</strong>
               <p style={{ margin: '6px 0 0', fontSize: '14px', color: '#4a5568', fontFamily: 'Poppins, sans-serif', lineHeight: '1.6' }}>
-                No manual typing = no mistakes!
+                🔗 link source or 📤 uploaded - see at a glance
               </p>
             </div>
           </div>
@@ -853,63 +902,58 @@ Words by Lina Bo Bardi, who became the architect of the MASP. She completed it i
           boxShadow: '0 4px 20px rgba(0,0,0,0.08)'
         }}>
           <h3 style={{ margin: '0 0 24px', fontSize: '24px', color: '#2d3748', fontFamily: 'Poppins, sans-serif', fontWeight: '700', textAlign: 'center' }}>
-            📚 Complete Guide
+            📚 Quick Start Guide
           </h3>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
             <div style={{ padding: '20px', background: '#f7fafc', borderRadius: '12px', borderLeft: '4px solid #ff8c42' }}>
               <h4 style={{ margin: '0 0 12px', fontSize: '18px', color: '#ff6b35', fontFamily: 'Poppins, sans-serif', fontWeight: '700' }}>
-                🔗 Using Photo Links
+                🔗 Best: Use Links
               </h4>
               <ol style={{ margin: 0, paddingLeft: '20px', fontFamily: 'Poppins, sans-serif', fontSize: '14px', lineHeight: '1.6', color: '#4a5568' }}>
-                <li>Go to WordPress Media Library</li>
-                <li>Click any photo → Copy File URL</li>
-                <li>Paste ALL photo URLs here (one per line)</li>
-                <li>Path & filenames auto-extracted! ✨</li>
+                <li>WordPress Media → Click photos</li>
+                <li>Copy File URLs (all at once)</li>
+                <li>Paste here → Auto-magic! ✨</li>
               </ol>
             </div>
 
             <div style={{ padding: '20px', background: '#f7fafc', borderRadius: '12px', borderLeft: '4px solid #f59e0b' }}>
               <h4 style={{ margin: '0 0 12px', fontSize: '18px', color: '#d97706', fontFamily: 'Poppins, sans-serif', fontWeight: '700' }}>
-                📤 Or Upload Files
+                📤 Or Upload New
               </h4>
               <ol style={{ margin: 0, paddingLeft: '20px', fontFamily: 'Poppins, sans-serif', fontSize: '14px', lineHeight: '1.6', color: '#4a5568' }}>
-                <li>Upload photos to WordPress first</li>
-                <li>Upload SAME files here</li>
-                <li>Set folder path manually</li>
-                <li>Names extracted from files!</li>
+                <li>Upload to WordPress first</li>
+                <li>Upload same files here</li>
+                <li>Set path manually if needed</li>
               </ol>
             </div>
 
             <div style={{ padding: '20px', background: '#f7fafc', borderRadius: '12px', borderLeft: '4px solid #9333ea' }}>
               <h4 style={{ margin: '0 0 12px', fontSize: '18px', color: '#7e22ce', fontFamily: 'Poppins, sans-serif', fontWeight: '700' }}>
-                📝 Create Post
+                🎬 Add Videos
               </h4>
               <ol style={{ margin: 0, paddingLeft: '20px', fontFamily: 'Poppins, sans-serif', fontSize: '14px', lineHeight: '1.6', color: '#4a5568' }}>
-                <li>Posts → Add New</li>
-                <li>Language + Category + Featured</li>
-                <li>Publish</li>
+                <li>Paste YouTube/Vimeo links</li>
+                <li>Or direct .mp4 URLs</li>
+                <li>Auto-embedded in article</li>
               </ol>
             </div>
 
             <div style={{ padding: '20px', background: '#f7fafc', borderRadius: '12px', borderLeft: '4px solid #3b82f6' }}>
               <h4 style={{ margin: '0 0 12px', fontSize: '18px', color: '#2563eb', fontFamily: 'Poppins, sans-serif', fontWeight: '700' }}>
-                🎨 Elementor
+                ✅ Finish
               </h4>
               <ol style={{ margin: 0, paddingLeft: '20px', fontFamily: 'Poppins, sans-serif', fontSize: '14px', lineHeight: '1.6', color: '#4a5568' }}>
-                <li>Edit with Elementor</li>
-                <li>Add HTML widget</li>
-                <li>Paste code → Update</li>
+                <li>Paste article text</li>
+                <li>Copy HTML code</li>
+                <li>Elementor → HTML widget → Done!</li>
               </ol>
             </div>
           </div>
 
           <div style={{ marginTop: '24px', padding: '20px', background: 'linear-gradient(135deg, #ff8c42 0%, #ff6b35 100%)', borderRadius: '12px', color: 'white', textAlign: 'center' }}>
-            <h5 style={{ margin: '0 0 8px', fontSize: '18px', fontFamily: 'Poppins, sans-serif', fontWeight: '700' }}>
-              🎯 Best Practice
-            </h5>
-            <p style={{ margin: 0, fontSize: '14px', fontFamily: 'Poppins, sans-serif', lineHeight: '1.6' }}>
-              Paste photo links from WordPress → Add videos → Paste text → Copy HTML → Elementor → Done! ✅
+            <p style={{ margin: 0, fontSize: '13px', fontFamily: 'Poppins, sans-serif', opacity: 0.9 }}>
+              Made with ❤️ by Claude AI • Supports all filename lengths & mix-n-match sources
             </p>
           </div>
         </div>
