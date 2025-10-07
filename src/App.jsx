@@ -129,6 +129,10 @@ export default function App() {
     const videoArray = videos.split('\n').map(v => v.trim()).filter(v => v);
     const parsedVideos = videoArray.map(parseVideoUrl);
 
+    // Escape special characters for safe JavaScript embedding
+    const escapePath = (str) => str.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
+    const safeBasePath = escapePath(path);
+
     if (quoteText.trim()) {
       const quoteKeyword = quoteText.trim().toLowerCase();
       contentLines = contentLines.map(line => {
@@ -204,9 +208,16 @@ export default function App() {
 
 <script>
 (function(){
-  const basePath = "${path}";
+  const basePath = "${safeBasePath}";
   const files = ${JSON.stringify(photoArray)};
   const videos = ${JSON.stringify(parsedVideos)};
+
+  // Debug mode - uncomment to see paths in console
+  // console.log('🔍 DEBUG INFO:');
+  // console.log('Base Path:', basePath);
+  // console.log('Files:', files);
+  // console.log('Videos:', videos);
+  // if(files.length > 0) console.log('First Image URL:', basePath + files[0]);
 
   const placements = {};
   const altMap = {};
