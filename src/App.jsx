@@ -1,13 +1,50 @@
 import React, { useState, useRef } from 'react';
-import { Copy, Check, Image, FolderOpen, FileText, Quote, Upload, X } from 'lucide-react';
+import { Copy, Check, Image, FolderOpen, FileText, Quote, Upload, X, Video, Link } from 'lucide-react';
 
 export default function App() {
   const [basePath, setBasePath] = useState('https://dersdeo.com/cinnamomo/wp-content/uploads/2025/10/');
   const [uploadedFiles, setUploadedFiles] = useState([]);
+  const [photoLinks, setPhotoLinks] = useState('');
+  const [videoLinks, setVideoLinks] = useState('');
   const [input, setInput] = useState('');
   const [blockquoteText, setBlockquoteText] = useState('');
   const [copied, setCopied] = useState(false);
   const fileInputRef = useRef(null);
+
+  const extractPathAndFilename = (url) => {
+    try {
+      const urlObj = new URL(url);
+      const pathname = urlObj.pathname;
+      const filename = pathname.split('/').pop();
+      const path = urlObj.origin + pathname.substring(0, pathname.lastIndexOf('/') + 1);
+      return { path, filename };
+    } catch {
+      return null;
+    }
+  };
+
+  const handlePhotoLinksChange = (e) => {
+    const links = e.target.value;
+    setPhotoLinks(links);
+    
+    // Parse links and extract paths and filenames
+    const urls = links.split('\n').map(l => l.trim()).filter(l => l);
+    if (urls.length > 0) {
+      const parsed = urls.map(extractPathAndFilename).filter(p => p);
+      
+      if (parsed.length > 0) {
+        // Set basePath from first URL
+        setBasePath(parsed[0].path);
+        
+        // Add filenames to uploadedFiles
+        const newFiles = parsed.map(p => ({
+          name: p.filename,
+          id: Math.random().toString(36)
+        }));
+        setUploadedFiles(newFiles);
+      }
+    }
+  };
 
   const handleFileUpload = (e) => {
     const files = Array.from(e.target.files);
@@ -22,7 +59,51 @@ export default function App() {
     setUploadedFiles(prev => prev.filter(f => f.id !== id));
   };
 
-  const formatToElementorHTML = (text, photoFiles, path, quoteText) => {
+  const clearPhotoLinks = () => {
+    setPhotoLinks('');
+  };
+
+  const parseVideoUrl = (url) => {
+    url = url.trim();
+    
+    // YouTube
+    const youtubeRegex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
+    const youtubeMatch = url.match(youtubeRegex);
+    if (youtubeMatch) {
+      return {
+        type: 'youtube',
+        id: youtubeMatch[1],
+        embedUrl: `https://www.youtube.com/embed/${youtubeMatch[1]}`
+      };
+    }
+    
+    // Vimeo
+    const vimeoRegex = /vimeo\.com\/(?:video\/)?(\d+)/;
+    const vimeoMatch = url.match(vimeoRegex);
+    if (vimeoMatch) {
+      return {
+        type: 'vimeo',
+        id: vimeoMatch[1],
+        embedUrl: `https://player.vimeo.com/video/${vimeoMatch[1]}`
+      };
+    }
+    
+    // Direct video file
+    if (url.match(/\.(mp4|webm|ogg)$/i)) {
+      return {
+        type: 'direct',
+        url: url
+      };
+    }
+    
+    // Generic iframe
+    return {
+      type: 'iframe',
+      url: url
+    };
+  };
+
+  const formatToElementorHTML = (text, photoFiles, path, videos, quoteText) => {
     if (!text.trim()) return '';
 
     const lines = text.split('\n').filter(line => line.trim());
@@ -33,6 +114,8 @@ export default function App() {
     let contentLines = lines.slice(2);
 
     const photoArray = photoFiles.map(f => f.name);
+    const videoArray = videos.split('\n').map(v => v.trim()).filter(v => v);
+    const parsedVideos = videoArray.map(parseVideoUrl);
 
     if (quoteText.trim()) {
       const quoteKeyword = quoteText.trim().toLowerCase();
@@ -60,6 +143,8 @@ export default function App() {
   .photo-row-triple img{width:100%;height:auto;display:block;border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,0.06);}
   .photo-single{margin:14px 0 19px 0;}
   .photo-single img{width:100%;height:auto;display:block;border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,0.06);}
+  .video-container{margin:20px 0;position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);}
+  .video-container iframe,.video-container video{position:absolute;top:0;left:0;width:100%;height:100%;border:0;border-radius:8px;}
   .gallery-title{margin-top:18px;font-size:1.05rem;}
   .two-col-gallery{display:grid;grid-template-columns:repeat(2,1fr);gap:5px;margin-top:8px;}
   .two-col-gallery img{width:100%;height:auto;display:block;border-radius:6px;}
@@ -99,10 +184,12 @@ export default function App() {
 (function(){
   const basePath = "${path}";
   const files = ${JSON.stringify(photoArray)};
+  const videos = ${JSON.stringify(parsedVideos)};
 
   const placements = {};
   const altMap = {};
   const captionMap = {};
+  const videoPlacements = {};
 
   const content = document.getElementById("article-content");
   const ps = content.querySelectorAll("p");
@@ -110,6 +197,9 @@ export default function App() {
   ps.forEach((p,i)=>{ if(!p.id) p.id = "paragraph-" + (i+1); });
 
   const placed = new Set();
+  const placedVideos = new Set();
+
+  // Manual photo placements
   Object.keys(placements).forEach(fname=>{
     const paraId = placements[fname];
     const target = document.getElementById(paraId);
@@ -119,8 +209,21 @@ export default function App() {
     }
   });
 
+  // Manual video placements
+  Object.keys(videoPlacements).forEach(videoIdx=>{
+    const paraId = videoPlacements[videoIdx];
+    const target = document.getElementById(paraId);
+    if(target && videos[videoIdx]){
+      target.insertAdjacentElement('afterend', makeVideo(videos[videoIdx]));
+      placedVideos.add(parseInt(videoIdx));
+    }
+  });
+
   const remaining = files.filter(f => !placed.has(f));
+  const remainingVideos = videos.filter((v, i) => !placedVideos.has(i));
   const paragraphCount = ps.length || 1;
+  
+  // Distribute photos
   const totalPhotos = remaining.length;
   const isEven = totalPhotos % 2 === 0;
   
@@ -180,6 +283,16 @@ export default function App() {
     });
   }
 
+  // Distribute videos evenly
+  remainingVideos.forEach((video, i) => {
+    const targetIndex = Math.min(((i + 1) * Math.floor(paragraphCount / (remainingVideos.length + 1))) + 1, paragraphCount);
+    const target = document.getElementById("paragraph-" + targetIndex);
+    if(target){
+      target.insertAdjacentElement('afterend', makeVideo(video));
+    }
+  });
+
+  // Gallery for remaining photos
   const galleryGrid = document.getElementById("gallery-grid");
   let galleryCount = 0;
   const galleryPhotos = files.filter(f => !placed.has(f));
@@ -200,6 +313,34 @@ export default function App() {
     if(!galleryIsEven){
       galleryGrid.style.gridTemplateColumns = "1fr";
     }
+  }
+
+  function makeVideo(videoData){
+    const container = document.createElement('div');
+    container.className = 'video-container';
+    
+    if(videoData.type === 'youtube' || videoData.type === 'vimeo'){
+      const iframe = document.createElement('iframe');
+      iframe.src = videoData.embedUrl;
+      iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
+      iframe.allowFullscreen = true;
+      container.appendChild(iframe);
+    } else if(videoData.type === 'direct'){
+      const video = document.createElement('video');
+      video.controls = true;
+      video.style.width = '100%';
+      const source = document.createElement('source');
+      source.src = videoData.url;
+      video.appendChild(source);
+      container.appendChild(video);
+    } else {
+      const iframe = document.createElement('iframe');
+      iframe.src = videoData.url;
+      iframe.allowFullscreen = true;
+      container.appendChild(iframe);
+    }
+    
+    return container;
   }
 
   function makePhotoRow(filenames){
@@ -275,7 +416,7 @@ export default function App() {
     return text;
   };
 
-  const formattedHTML = formatToElementorHTML(input, uploadedFiles, basePath, blockquoteText);
+  const formattedHTML = formatToElementorHTML(input, uploadedFiles, basePath, videoLinks, blockquoteText);
 
   const copyToClipboard = () => {
     navigator.clipboard.writeText(formattedHTML);
@@ -285,14 +426,8 @@ export default function App() {
 
   const loadExample = () => {
     setBasePath('https://dersdeo.com/cinnamomo/wp-content/uploads/2025/10/');
-    setUploadedFiles([
-      { name: 'paulista-1.jpg', id: '1' },
-      { name: 'veridiana-pizza-2.jpg', id: '2' },
-      { name: 'jardins-3.jpg', id: '3' },
-      { name: 'masp-4.jpg', id: '4' },
-      { name: 'bardi-5.jpg', id: '5' },
-      { name: 'architecture-6.jpg', id: '6' }
-    ]);
+    setPhotoLinks('https://dersdeo.com/cinnamomo/wp-content/uploads/2025/10/paulista-1.jpg\nhttps://dersdeo.com/cinnamomo/wp-content/uploads/2025/10/veridiana-2.jpg');
+    setVideoLinks('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
     setInput(`Paulista! Everything ends in pizza
 Pizzeria Veridiana, Jardins district, São Paulo
 "Everything ends in pizza!", just as for Italians everything is solved with tarallucci and wine, the waiter at Veridiana explains to me. Dining in São Paulo means rediscovering the flavors of the Italians who "came to make America."
@@ -347,7 +482,7 @@ Words by Lina Bo Bardi, who became the architect of the MASP. She completed it i
             📝 Elementor Blog Formatter
           </h1>
           <p style={{ color: '#4a5568', fontSize: '18px', marginBottom: '16px', fontFamily: 'Poppins, sans-serif', fontWeight: '400' }}>
-            Upload photos, paste text, generate perfect HTML automatically!
+            Paste links or upload files, add videos, generate perfect HTML!
           </p>
           <button
             onClick={loadExample}
@@ -374,74 +509,123 @@ Words by Lina Bo Bardi, who became the architect of the MASP. She completed it i
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '24px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             
-            <StepCard number="1" title="Photo Folder Path" icon={FolderOpen} isActive={!basePath}>
-              <label style={{ fontSize: '14px', color: '#4a5568', display: 'block', marginBottom: '8px', fontFamily: 'Poppins, sans-serif' }}>
-                WordPress media folder path (same as uploaded photos):
-              </label>
-              <input
-                type="text"
-                value={basePath}
-                onChange={(e) => setBasePath(e.target.value)}
-                placeholder="https://yoursite.com/wp-content/uploads/2025/10/"
-                style={{
-                  width: '100%',
-                  padding: '12px',
-                  border: '2px solid #e2e8f0',
-                  borderRadius: '10px',
-                  fontSize: '13px',
-                  fontFamily: 'monospace',
-                  transition: 'border 0.3s'
-                }}
-                onFocus={(e) => e.target.style.borderColor = '#ff8c42'}
-                onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
-              />
-            </StepCard>
+            <StepCard number="1" title="Add Photos" icon={Link} isActive={!basePath || uploadedFiles.length === 0}>
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ fontSize: '14px', color: '#4a5568', display: 'block', marginBottom: '8px', fontFamily: 'Poppins, sans-serif', fontWeight: '600' }}>
+                  Option A: Paste Photo Links (Auto-extracts path & names!)
+                </label>
+                <textarea
+                  value={photoLinks}
+                  onChange={handlePhotoLinksChange}
+                  placeholder="https://yoursite.com/wp-content/uploads/2025/10/photo1.jpg&#10;https://yoursite.com/wp-content/uploads/2025/10/photo2.jpg&#10;&#10;One full URL per line"
+                  style={{
+                    width: '100%',
+                    height: '100px',
+                    padding: '12px',
+                    border: '2px solid #e2e8f0',
+                    borderRadius: '10px',
+                    fontSize: '13px',
+                    fontFamily: 'monospace',
+                    resize: 'vertical',
+                    lineHeight: '1.6',
+                    transition: 'border 0.3s'
+                  }}
+                  onFocus={(e) => e.target.style.borderColor = '#ff8c42'}
+                  onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+                />
+                {photoLinks && (
+                  <button
+                    onClick={clearPhotoLinks}
+                    style={{
+                      marginTop: '8px',
+                      padding: '6px 12px',
+                      background: '#fee',
+                      border: 'none',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontSize: '13px',
+                      color: '#e53e3e',
+                      fontFamily: 'Poppins, sans-serif'
+                    }}
+                  >
+                    Clear Links
+                  </button>
+                )}
+              </div>
 
-            <StepCard number="2" title="Upload Photos" icon={Upload} isActive={basePath && uploadedFiles.length === 0}>
-              <label style={{ fontSize: '14px', color: '#4a5568', display: 'block', marginBottom: '8px', fontFamily: 'Poppins, sans-serif' }}>
-                Select photos you uploaded to WordPress:
-              </label>
-              
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                accept="image/*"
-                onChange={handleFileUpload}
-                style={{ display: 'none' }}
-              />
-              
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                style={{
-                  width: '100%',
-                  padding: '16px',
-                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '10px',
-                  cursor: 'pointer',
-                  fontSize: '15px',
-                  fontWeight: '600',
-                  fontFamily: 'Poppins, sans-serif',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '10px',
-                  transition: 'all 0.3s',
-                  boxShadow: '0 4px 12px rgba(102, 126, 234, 0.3)'
-                }}
-                onMouseOver={(e) => e.target.style.transform = 'translateY(-2px)'}
-                onMouseOut={(e) => e.target.style.transform = 'translateY(0)'}
-              >
-                <Upload size={20} />
-                Click to Select Photos
-              </button>
+              <div style={{ 
+                textAlign: 'center', 
+                padding: '8px 0', 
+                color: '#718096', 
+                fontFamily: 'Poppins, sans-serif',
+                fontSize: '14px',
+                fontWeight: '600'
+              }}>
+                ─── OR ───
+              </div>
+
+              <div>
+                <label style={{ fontSize: '14px', color: '#4a5568', display: 'block', marginBottom: '8px', fontFamily: 'Poppins, sans-serif', fontWeight: '600' }}>
+                  Option B: Upload New Photos
+                </label>
+                
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept="image/*"
+                  onChange={handleFileUpload}
+                  style={{ display: 'none' }}
+                />
+                
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  style={{
+                    width: '100%',
+                    padding: '16px',
+                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '10px',
+                    cursor: 'pointer',
+                    fontSize: '15px',
+                    fontWeight: '600',
+                    fontFamily: 'Poppins, sans-serif',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '10px',
+                    transition: 'all 0.3s',
+                    boxShadow: '0 4px 12px rgba(102, 126, 234, 0.3)'
+                  }}
+                  onMouseOver={(e) => e.target.style.transform = 'translateY(-2px)'}
+                  onMouseOut={(e) => e.target.style.transform = 'translateY(0)'}
+                >
+                  <Upload size={20} />
+                  Click to Select Photos
+                </button>
+
+                <div style={{ marginTop: '12px', fontSize: '14px', color: '#4a5568', fontFamily: 'Poppins, sans-serif' }}>
+                  <strong>📁 Folder Path:</strong>
+                  <div style={{ 
+                    marginTop: '4px',
+                    padding: '8px',
+                    background: '#f7fafc',
+                    borderRadius: '6px',
+                    fontSize: '12px',
+                    fontFamily: 'monospace',
+                    wordBreak: 'break-all',
+                    color: photoLinks ? '#10b981' : '#718096'
+                  }}>
+                    {basePath || 'Will be set from photo links or manually...'}
+                  </div>
+                </div>
+              </div>
 
               {uploadedFiles.length > 0 && (
-                <div style={{ marginTop: '12px', maxHeight: '200px', overflowY: 'auto', background: '#f7fafc', borderRadius: '8px', padding: '12px' }}>
+                <div style={{ marginTop: '12px', maxHeight: '150px', overflowY: 'auto', background: '#f7fafc', borderRadius: '8px', padding: '12px' }}>
                   <div style={{ fontSize: '13px', fontWeight: '600', color: '#4a5568', marginBottom: '8px', fontFamily: 'Poppins, sans-serif' }}>
-                    📁 {uploadedFiles.length} photo{uploadedFiles.length > 1 ? 's' : ''} selected:
+                    📁 {uploadedFiles.length} photo{uploadedFiles.length > 1 ? 's' : ''}
                   </div>
                   {uploadedFiles.map(file => (
                     <div key={file.id} style={{ 
@@ -477,23 +661,47 @@ Words by Lina Bo Bardi, who became the architect of the MASP. She completed it i
                   ))}
                 </div>
               )}
-              
-              <div style={{ marginTop: '10px', fontSize: '13px', color: '#718096', fontFamily: 'Poppins, sans-serif' }}>
-                💡 Program automatically extracts filenames - no typing errors!
+            </StepCard>
+
+            <StepCard number="2" title="Add Video Links (Optional)" icon={Video} isActive={false}>
+              <label style={{ fontSize: '14px', color: '#4a5568', display: 'block', marginBottom: '8px', fontFamily: 'Poppins, sans-serif' }}>
+                YouTube, Vimeo, or direct video URLs (one per line):
+              </label>
+              <textarea
+                value={videoLinks}
+                onChange={(e) => setVideoLinks(e.target.value)}
+                placeholder="https://www.youtube.com/watch?v=...&#10;https://vimeo.com/...&#10;https://yoursite.com/video.mp4"
+                style={{
+                  width: '100%',
+                  height: '100px',
+                  padding: '12px',
+                  border: '2px solid #e2e8f0',
+                  borderRadius: '10px',
+                  fontSize: '13px',
+                  fontFamily: 'monospace',
+                  resize: 'vertical',
+                  lineHeight: '1.6',
+                  transition: 'border 0.3s'
+                }}
+                onFocus={(e) => e.target.style.borderColor = '#ff8c42'}
+                onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+              />
+              <div style={{ marginTop: '8px', fontSize: '13px', color: '#718096', fontFamily: 'Poppins, sans-serif' }}>
+                🎥 Supports: YouTube, Vimeo, MP4, WebM, OGG
               </div>
             </StepCard>
 
             <StepCard number="3" title="Article Content" icon={FileText} isActive={uploadedFiles.length > 0 && !input}>
               <label style={{ fontSize: '14px', color: '#4a5568', display: 'block', marginBottom: '8px', fontFamily: 'Poppins, sans-serif' }}>
-                Paste your text (line 1: Title, line 2: Subtitle):
+                Paste text (line 1: Title, line 2: Subtitle):
               </label>
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder="Title goes here&#10;Subtitle or location info&#10;&#10;First paragraph...&#10;&#10;Second paragraph...&#10;&#10;*italic* **bold**"
+                placeholder="Title goes here&#10;Subtitle or location&#10;&#10;First paragraph...&#10;&#10;*italic* **bold**"
                 style={{
                   width: '100%',
-                  height: '240px',
+                  height: '200px',
                   padding: '12px',
                   border: '2px solid #e2e8f0',
                   borderRadius: '10px',
@@ -519,7 +727,7 @@ Words by Lina Bo Bardi, who became the architect of the MASP. She completed it i
                 Add Quote (Optional)
               </h3>
               <label style={{ fontSize: '14px', color: '#4a5568', display: 'block', marginBottom: '8px', fontFamily: 'Poppins, sans-serif' }}>
-                Write a keyword from the sentence you want to quote:
+                Keyword for blockquote:
               </label>
               <input
                 type="text"
@@ -538,9 +746,6 @@ Words by Lina Bo Bardi, who became the architect of the MASP. She completed it i
                 onFocus={(e) => e.target.style.borderColor = '#ff8c42'}
                 onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
               />
-              <div style={{ marginTop: '8px', fontSize: '13px', color: '#718096', fontStyle: 'italic', fontFamily: 'Poppins, sans-serif' }}>
-                Paragraph containing this keyword will auto-convert to blockquote
-              </div>
             </div>
 
           </div>
@@ -621,21 +826,21 @@ Words by Lina Bo Bardi, who became the architect of the MASP. She completed it i
           <h3 style={{ margin: '0 0 18px', fontSize: '20px', color: '#2d3748', fontFamily: 'Poppins, sans-serif', fontWeight: '700' }}>💡 Quick Tips</h3>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
             <div style={{ padding: '16px', background: '#fff5f0', borderRadius: '12px', borderLeft: '4px solid #ff8c42' }}>
-              <strong style={{ color: '#ff6b35', fontFamily: 'Poppins, sans-serif', fontSize: '15px' }}>Auto Filenames:</strong>
+              <strong style={{ color: '#ff6b35', fontFamily: 'Poppins, sans-serif', fontSize: '15px' }}>Smart Links:</strong>
               <p style={{ margin: '6px 0 0', fontSize: '14px', color: '#4a5568', fontFamily: 'Poppins, sans-serif', lineHeight: '1.6' }}>
-                Upload photos and names are extracted automatically - zero typing errors!
+                Paste full photo URLs - path & names extracted automatically!
               </p>
             </div>
             <div style={{ padding: '16px', background: '#fef5e7', borderRadius: '12px', borderLeft: '4px solid #f59e0b' }}>
-              <strong style={{ color: '#d97706', fontFamily: 'Poppins, sans-serif', fontSize: '15px' }}>Smart Layout:</strong>
+              <strong style={{ color: '#d97706', fontFamily: 'Poppins, sans-serif', fontSize: '15px' }}>Two Ways:</strong>
               <p style={{ margin: '6px 0 0', fontSize: '14px', color: '#4a5568', fontFamily: 'Poppins, sans-serif', lineHeight: '1.6' }}>
-                Even &amp; 4+: 2 cols | Odd &amp; 5+: intelligent distribution
+                Paste links OR upload files - both work perfectly!
               </p>
             </div>
             <div style={{ padding: '16px', background: '#f3e8ff', borderRadius: '12px', borderLeft: '4px solid #9333ea' }}>
-              <strong style={{ color: '#7e22ce', fontFamily: 'Poppins, sans-serif', fontSize: '15px' }}>One Click:</strong>
+              <strong style={{ color: '#7e22ce', fontFamily: 'Poppins, sans-serif', fontSize: '15px' }}>Zero Errors:</strong>
               <p style={{ margin: '6px 0 0', fontSize: '14px', color: '#4a5568', fontFamily: 'Poppins, sans-serif', lineHeight: '1.6' }}>
-                Copy HTML and paste directly into Elementor HTML widget
+                No manual typing = no mistakes!
               </p>
             </div>
           </div>
@@ -648,93 +853,63 @@ Words by Lina Bo Bardi, who became the architect of the MASP. She completed it i
           boxShadow: '0 4px 20px rgba(0,0,0,0.08)'
         }}>
           <h3 style={{ margin: '0 0 24px', fontSize: '24px', color: '#2d3748', fontFamily: 'Poppins, sans-serif', fontWeight: '700', textAlign: 'center' }}>
-            📚 Complete WordPress + Elementor Guide
+            📚 Complete Guide
           </h3>
 
-          <div style={{ marginBottom: '32px', padding: '24px', background: '#f7fafc', borderRadius: '12px', borderLeft: '4px solid #ff8c42' }}>
-            <h4 style={{ margin: '0 0 16px', fontSize: '20px', color: '#ff6b35', fontFamily: 'Poppins, sans-serif', fontWeight: '700' }}>
-              📸 PART A: Upload Photos to WordPress
-            </h4>
-            
-            <div style={{ marginBottom: '20px' }}>
-              <h5 style={{ margin: '0 0 12px', fontSize: '16px', color: '#2d3748', fontFamily: 'Poppins, sans-serif', fontWeight: '600' }}>
-                Step 1: Access Media Library
-              </h5>
-              <ol style={{ margin: 0, paddingLeft: '24px', fontFamily: 'Poppins, sans-serif', fontSize: '14px', lineHeight: '1.8', color: '#4a5568' }}>
-                <li>WordPress admin → <strong>"Media"</strong> → <strong>"Library"</strong> → <strong>"Add New"</strong></li>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+            <div style={{ padding: '20px', background: '#f7fafc', borderRadius: '12px', borderLeft: '4px solid #ff8c42' }}>
+              <h4 style={{ margin: '0 0 12px', fontSize: '18px', color: '#ff6b35', fontFamily: 'Poppins, sans-serif', fontWeight: '700' }}>
+                🔗 Using Photo Links
+              </h4>
+              <ol style={{ margin: 0, paddingLeft: '20px', fontFamily: 'Poppins, sans-serif', fontSize: '14px', lineHeight: '1.6', color: '#4a5568' }}>
+                <li>Go to WordPress Media Library</li>
+                <li>Click any photo → Copy File URL</li>
+                <li>Paste ALL photo URLs here (one per line)</li>
+                <li>Path & filenames auto-extracted! ✨</li>
               </ol>
             </div>
 
-            <div style={{ marginBottom: '20px' }}>
-              <h5 style={{ margin: '0 0 12px', fontSize: '16px', color: '#2d3748', fontFamily: 'Poppins, sans-serif', fontWeight: '600' }}>
-                Step 2: Upload Photos
-              </h5>
-              <ol style={{ margin: 0, paddingLeft: '24px', fontFamily: 'Poppins, sans-serif', fontSize: '14px', lineHeight: '1.8', color: '#4a5568' }}>
-                <li>Select/drag photos → Wait for upload</li>
-                <li><strong>Keep the same files</strong> to upload to this tool!</li>
+            <div style={{ padding: '20px', background: '#f7fafc', borderRadius: '12px', borderLeft: '4px solid #f59e0b' }}>
+              <h4 style={{ margin: '0 0 12px', fontSize: '18px', color: '#d97706', fontFamily: 'Poppins, sans-serif', fontWeight: '700' }}>
+                📤 Or Upload Files
+              </h4>
+              <ol style={{ margin: 0, paddingLeft: '20px', fontFamily: 'Poppins, sans-serif', fontSize: '14px', lineHeight: '1.6', color: '#4a5568' }}>
+                <li>Upload photos to WordPress first</li>
+                <li>Upload SAME files here</li>
+                <li>Set folder path manually</li>
+                <li>Names extracted from files!</li>
               </ol>
             </div>
 
-            <div>
-              <h5 style={{ margin: '0 0 12px', fontSize: '16px', color: '#2d3748', fontFamily: 'Poppins, sans-serif', fontWeight: '600' }}>
-                Step 3: Copy Folder Path
-              </h5>
-              <ol style={{ margin: 0, paddingLeft: '24px', fontFamily: 'Poppins, sans-serif', fontSize: '14px', lineHeight: '1.8', color: '#4a5568' }}>
-                <li>Click any photo → Find "File URL"</li>
-                <li>Copy URL, <strong>remove filename</strong></li>
-                <li style={{ background: '#fff', padding: '8px', borderRadius: '6px', fontFamily: 'monospace', fontSize: '13px', marginTop: '8px' }}>
-                  ✅ https://site.com/wp-content/uploads/2025/10/
-                </li>
+            <div style={{ padding: '20px', background: '#f7fafc', borderRadius: '12px', borderLeft: '4px solid #9333ea' }}>
+              <h4 style={{ margin: '0 0 12px', fontSize: '18px', color: '#7e22ce', fontFamily: 'Poppins, sans-serif', fontWeight: '700' }}>
+                📝 Create Post
+              </h4>
+              <ol style={{ margin: 0, paddingLeft: '20px', fontFamily: 'Poppins, sans-serif', fontSize: '14px', lineHeight: '1.6', color: '#4a5568' }}>
+                <li>Posts → Add New</li>
+                <li>Language + Category + Featured</li>
+                <li>Publish</li>
               </ol>
             </div>
-          </div>
 
-          <div style={{ marginBottom: '32px', padding: '24px', background: '#f7fafc', borderRadius: '12px', borderLeft: '4px solid #f59e0b' }}>
-            <h4 style={{ margin: '0 0 16px', fontSize: '20px', color: '#d97706', fontFamily: 'Poppins, sans-serif', fontWeight: '700' }}>
-              🎯 PART B: Use This Tool
-            </h4>
-            <ol style={{ margin: 0, paddingLeft: '24px', fontFamily: 'Poppins, sans-serif', fontSize: '14px', lineHeight: '1.8', color: '#4a5568' }}>
-              <li><strong>Step 1:</strong> Paste folder path from WordPress</li>
-              <li><strong>Step 2:</strong> Upload THE SAME photos (program extracts names automatically!)</li>
-              <li><strong>Step 3:</strong> Paste article text</li>
-              <li><strong>Optional:</strong> Add blockquote keyword</li>
-              <li><strong>Copy HTML</strong> - Ready to use! 🎉</li>
-            </ol>
-          </div>
-
-          <div style={{ marginBottom: '32px', padding: '24px', background: '#f7fafc', borderRadius: '12px', borderLeft: '4px solid #9333ea' }}>
-            <h4 style={{ margin: '0 0 16px', fontSize: '20px', color: '#7e22ce', fontFamily: 'Poppins, sans-serif', fontWeight: '700' }}>
-              📝 PART C: Create WordPress Post
-            </h4>
-            <ol style={{ margin: 0, paddingLeft: '24px', fontFamily: 'Poppins, sans-serif', fontSize: '14px', lineHeight: '1.8', color: '#4a5568' }}>
-              <li><strong>"Posts"</strong> → <strong>"Add New"</strong> → Enter title</li>
-              <li><strong>Language (Polylang):</strong> Select ⚠️ Don't forget!</li>
-              <li><strong>Category:</strong> Choose</li>
-              <li><strong>Featured Image:</strong> Select from photos</li>
-              <li>Click <strong>"Publish"</strong></li>
-            </ol>
-          </div>
-
-          <div style={{ padding: '24px', background: '#f7fafc', borderRadius: '12px', borderLeft: '4px solid #3b82f6' }}>
-            <h4 style={{ margin: '0 0 16px', fontSize: '20px', color: '#2563eb', fontFamily: 'Poppins, sans-serif', fontWeight: '700' }}>
-              🎨 PART D: Elementor
-            </h4>
-            <ol style={{ margin: 0, paddingLeft: '24px', fontFamily: 'Poppins, sans-serif', fontSize: '14px', lineHeight: '1.8', color: '#4a5568' }}>
-              <li>Click <strong>"Edit with Elementor"</strong></li>
-              <li>Search <strong>"HTML"</strong> widget</li>
-              <li><strong>Drag HTML widget</strong> to page</li>
-              <li><strong>Delete</strong> default code</li>
-              <li><strong>Paste</strong> generated HTML</li>
-              <li>Click <strong>"Update"</strong> → Done! 🎉</li>
-            </ol>
+            <div style={{ padding: '20px', background: '#f7fafc', borderRadius: '12px', borderLeft: '4px solid #3b82f6' }}>
+              <h4 style={{ margin: '0 0 12px', fontSize: '18px', color: '#2563eb', fontFamily: 'Poppins, sans-serif', fontWeight: '700' }}>
+                🎨 Elementor
+              </h4>
+              <ol style={{ margin: 0, paddingLeft: '20px', fontFamily: 'Poppins, sans-serif', fontSize: '14px', lineHeight: '1.6', color: '#4a5568' }}>
+                <li>Edit with Elementor</li>
+                <li>Add HTML widget</li>
+                <li>Paste code → Update</li>
+              </ol>
+            </div>
           </div>
 
           <div style={{ marginTop: '24px', padding: '20px', background: 'linear-gradient(135deg, #ff8c42 0%, #ff6b35 100%)', borderRadius: '12px', color: 'white', textAlign: 'center' }}>
             <h5 style={{ margin: '0 0 8px', fontSize: '18px', fontFamily: 'Poppins, sans-serif', fontWeight: '700' }}>
-              🎯 Quick Summary
+              🎯 Best Practice
             </h5>
             <p style={{ margin: 0, fontSize: '14px', fontFamily: 'Poppins, sans-serif', lineHeight: '1.6' }}>
-              Upload to WordPress → Copy path → Upload here (auto names!) → Paste text → Copy HTML → Elementor → Done! ✅
+              Paste photo links from WordPress → Add videos → Paste text → Copy HTML → Elementor → Done! ✅
             </p>
           </div>
         </div>
